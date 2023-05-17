@@ -1,3 +1,10 @@
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-add_subdirectory(zello_world)
+add_subdirectory(test1_async_cmdlist_event)
+add_subdirectory(test2_sync_cmdlist_no_event)
+add_subdirectory(test3_async_cmdqueue_sync_needed)
+add_subdirectory(test4_sync_cmdqueue_sync_not_needed)
+add_subdirectory(test5_reused_cmdlist_and_cmdqueue)
+add_subdirectory(test6_double_async_cmdqueue_sync_needed)
+add_subdirectory(test7_cmdlist_execute_multiple_approach)
+add_subdirectory(test8_cmdlist_execute_multiple_approach_event_sync)

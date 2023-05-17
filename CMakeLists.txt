@@ -12,7 +12,7 @@ endif()
 
 # This project follows semantic versioning (https://semver.org/). Only set the
 # major and minor version here - patch version is determined dynamically.
-project(level-zero VERSION 1.11)
+project(level-zero VERSION 1.10)
 
 # Patch version corresponds to # of commits on master since last version
 # major/minor tag (e.g., v1.0). If not building in a git repository, then get
@@ -62,6 +62,7 @@ set(CMAKE_PROJECT_VERSION "${PROJECT_VERSION}")
 add_definitions(-DLOADER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR})
 add_definitions(-DLOADER_VERSION_MINOR=${PROJECT_VERSION_MINOR})
 add_definitions(-DLOADER_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+add_compile_definitions(_SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING)
 
 file(WRITE "${CMAKE_BINARY_DIR}/VERSION" "${PROJECT_VERSION}")
 

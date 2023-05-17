@@ -1,7 +1,7 @@
-set(TARGET_NAME zello_world)
+set(TARGET_NAME test5)
 
 add_executable(${TARGET_NAME}
-    ${CMAKE_CURRENT_SOURCE_DIR}/zello_world.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test5_reused_cmdlist_and_cmdqueue.cpp
 )
     
 if(MSVC)
