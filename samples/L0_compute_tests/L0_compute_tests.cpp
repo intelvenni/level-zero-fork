@@ -8,10 +8,177 @@
 
 #include <stdlib.h>
 #include "zello_init.h"
+#include "L0_compute_tests.h"
 
 #include <memory>
 #include <fstream>
 
+
+class L0ComputeTest {
+public:
+
+	ze_command_queue_handle_t cmdQueue = nullptr;
+	ze_command_list_handle_t cmdList = nullptr;
+	ze_command_queue_desc_t cmdQueueDesc = {};
+	ze_kernel_handle_t kernels[2];
+	ze_module_handle_t modules[2];
+
+	L0ComputeTest(std::string testName, std::string testDescription, ze_device_handle_t& device, ze_context_handle_t& context, bool syncWithEvent, int kernelAmount, int moduleAmount, bool immediateCmdListNeeded, kernelLaunchScenario kernelScenario) {
+
+		std::cout << "Running test: " << testName << "\n";
+		std::cout << "Description: " << testDescription << "\n";
+
+		uint32_t numQueueGroups = 0;
+		zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups, nullptr);
+		if (numQueueGroups == 0) {
+			std::cout << "No queue groups found\n";
+			std::terminate();
+		}
+
+		std::vector<ze_command_queue_group_properties_t> queueProperties(numQueueGroups);
+		zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups, queueProperties.data());
+
+		if (immediateCmdListNeeded) {
+			createImmediateCmdList(context, device, numQueueGroups, queueProperties, cmdList);
+		}
+		else {
+			createCmdQueue(context, device, cmdQueue, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS, numQueueGroups, queueProperties, cmdQueueDesc);
+			createCommandList(context, device, numQueueGroups, queueProperties, cmdList, cmdQueueDesc);
+		}
+
+		// Create buffers
+		const uint32_t items = 1024;
+		constexpr size_t allocSize = items * items * sizeof(int);
+		ze_device_mem_alloc_desc_t memAllocDesc = { ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC };
+		memAllocDesc.ordinal = 0;
+
+		ze_host_mem_alloc_desc_t hostDesc = { ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC };
+
+		void* sharedA = nullptr;
+		zeMemAllocShared(context, &memAllocDesc, &hostDesc, allocSize, 1, device, &sharedA);
+
+		void* sharedB = nullptr;
+		zeMemAllocShared(context, &memAllocDesc, &hostDesc, allocSize, 1, device, &sharedB);
+
+		void* dstResultSum = nullptr;
+		zeMemAllocShared(context, &memAllocDesc, &hostDesc, allocSize, 1, device, &dstResultSum);
+
+		// memory initialization
+		int valA = 4;
+		int valB = 2;
+		memset(sharedA, valA, allocSize);
+		memset(sharedB, valB, allocSize);
+
+		// Module and kernel initialization
+		ze_module_handle_t module = nullptr;
+		ze_kernel_handle_t kernel = nullptr;
+
+		std::ifstream file("matrixMultiply.spv", std::ios::binary);
+
+		// Open SPIR-V binary file
+		if (file.is_open()) {
+			file.seekg(0, file.end);
+			auto length = file.tellg();
+			file.seekg(0, file.beg);
+
+			std::unique_ptr<char[]> spirvInput(new char[length]);
+			file.read(spirvInput.get(), length);
+
+			ze_module_desc_t moduleDesc = {};
+			ze_module_build_log_handle_t buildLog;
+			moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+			moduleDesc.pInputModule = reinterpret_cast<const uint8_t*>(spirvInput.get());
+			moduleDesc.inputSize = length;
+			moduleDesc.pBuildFlags = "";
+
+			// Create module
+			auto status = zeModuleCreate(context, device, &moduleDesc, &module, &buildLog);
+			if (status != ZE_RESULT_SUCCESS) {
+				size_t szLog = 0;
+				zeModuleBuildLogGetString(buildLog, &szLog, nullptr);
+
+				char* stringLog = (char*)malloc(szLog);
+				zeModuleBuildLogGetString(buildLog, &szLog, stringLog);
+				std::cout << "Build log: " << stringLog << std::endl;
+			}
+			zeModuleBuildLogDestroy(buildLog);
+
+			// Create kernel
+			ze_kernel_desc_t kernelDesc = {};
+			kernelDesc.pKernelName = "incrementandsum";
+			zeKernelCreate(module, &kernelDesc, &kernel);
+
+			uint32_t groupSizeX = 32u;
+			uint32_t groupSizeY = 32u;
+			uint32_t groupSizeZ = 1u;
+			zeKernelSuggestGroupSize(kernel, items, items, 1U, &groupSizeX, &groupSizeY, &groupSizeZ);
+			zeKernelSetGroupSize(kernel, groupSizeX, groupSizeY, groupSizeY);
+
+			// Push arguments
+			zeKernelSetArgumentValue(kernel, 0, sizeof(&sharedA), &sharedA);
+			zeKernelSetArgumentValue(kernel, 1, sizeof(sharedB), &sharedB);
+			zeKernelSetArgumentValue(kernel, 2, sizeof(dstResultSum), &dstResultSum);
+
+			// Kernel thread-dispatch
+			ze_group_count_t launchArgs;
+			launchArgs.groupCountX = items / groupSizeX;
+			launchArgs.groupCountY = items / groupSizeY;
+			launchArgs.groupCountZ = 1;
+
+			ze_event_handle_t event = nullptr;
+			if (syncWithEvent) {
+				// Create event and event pool
+				ze_event_pool_desc_t eventPoolDesc = {
+					ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
+					nullptr,
+					ZE_EVENT_POOL_FLAG_HOST_VISIBLE, // All events in pool are visible to Host
+					1
+				};
+				ze_event_pool_handle_t eventPool;
+				zeEventPoolCreate(context, &eventPoolDesc, 0, nullptr, &eventPool);
+
+				ze_event_desc_t eventDesc = {
+					ZE_STRUCTURE_TYPE_EVENT_DESC,
+					nullptr,
+					0,
+					0,
+					ZE_EVENT_SCOPE_FLAG_HOST
+				};
+				
+				zeEventCreate(eventPool, &eventDesc, &event);
+			}
+
+			// Immediately submit a kernel to the device and launch
+			// Event may be nullptr if sync is not needed
+			switch (kernelScenario)
+			{
+			case ZE_COMMAND_LIST_APPEND_LAUNCH_KERNEL:
+				zeCommandListAppendLaunchKernel(cmdList, kernel, &launchArgs, event, 0, nullptr);
+				break;
+			case ZE_COMMAND_LIST_APPEND_LAUNCH_MULTIPLE_KERNELS_INDIRECT:
+				//zeCommandListAppendLaunchMultipleKernelsIndirect(cmdList, 2, kernels, &kernelArrSize, &launchArgs, nullptr, 0, nullptr);
+				break;
+			case ZE_COMMAND_LIST_APPEND_LAUNCH_COOPERATIVE_KERNEL:
+				zeCommandListAppendLaunchCooperativeKernel(cmdList, kernel, &launchArgs, nullptr, 0, nullptr); // TODO: Muuta kernel muuttuja oikeaksi
+				break;
+			case ZE_COMMAND_LIST_APPEND_LAUNCH_KERNEL_INDIRECT:
+				zeCommandListAppendLaunchKernelIndirect(cmdList, kernel, &launchArgs, nullptr, 0, nullptr); // TODO: Muuta kernel muuttuja oikeaksi
+				break;
+			default:
+				break;
+			}
+			
+			file.close();
+		}
+		else {
+			std::cout << "SPIR-V binary file not found\n";
+			std::cout << "\nTest status: FAIL\n";
+			std::terminate();
+		}
+
+		std::cout << "Test status: PASS" << "\n\n";
+	}
+};
 
  // Init, create device and context
 void initializeDeviceAndContext(ze_context_handle_t& context, ze_device_handle_t& device) {
