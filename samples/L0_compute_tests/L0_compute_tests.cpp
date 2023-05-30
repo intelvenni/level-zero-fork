@@ -160,6 +160,18 @@ public:
 			}
 		}
 
+		// Validation
+		uint32_t* srcA = static_cast<uint32_t*>(sharedA);
+		uint32_t* srcB = static_cast<uint32_t*>(sharedB);
+		uint32_t* dstResult = static_cast<uint32_t*>(dstResultSum);
+
+		std::cout << "\n\nsrcA value: " << srcA[0] << std::endl;
+		std::cout << "srcB value: " << srcB[0] << std::endl;
+		std::cout << "dstResult value: " << dstResult[0] << std::endl;
+		if (kernelScenario != ZE_COMMAND_LIST_APPEND_LAUNCH_KERNEL_INDIRECT)
+			validateSum(srcA, srcB, dstResult);
+
+
 		// Cleanup
 		zeMemFree(context, dstResultSum);
 		zeMemFree(context, sharedA);
@@ -171,6 +183,13 @@ public:
 		std::cout << "Test status: PASS" << "\n\n";
 	}
 };
+
+void validateSum(uint32_t* srcA, uint32_t* srcB, uint32_t* result) {
+
+	int sum = 0;
+	sum = srcA[0] + srcB[0] + 1;
+	std::cout << "Validation: " << (*result == sum ? "PASSED" : "FAILED") << "\n";
+}
 
 // Init, create device and context
 void initializeDeviceAndContext(ze_context_handle_t& context, ze_device_handle_t& device) {
@@ -319,10 +338,10 @@ void appendAndLaunchKernels(ze_event_handle_t& event, ze_command_list_handle_t& 
 		//zeCommandListAppendLaunchMultipleKernelsIndirect(cmdList, 2, kernels, &kernelArrSize, &launchArgs, nullptr, 0, nullptr); // TODO: This launching scenario does not work. Why? (Program freezes and eventually dies.)
 		break;
 	case ZE_COMMAND_LIST_APPEND_LAUNCH_COOPERATIVE_KERNEL:
-		zeCommandListAppendLaunchCooperativeKernel(cmdList, kernel, &launchArgs, nullptr, 0, nullptr); // TODO: Muuta kernel muuttuja oikeaksi
+		zeCommandListAppendLaunchCooperativeKernel(cmdList, kernel, &launchArgs, event, 0, nullptr);
 		break;
 	case ZE_COMMAND_LIST_APPEND_LAUNCH_KERNEL_INDIRECT:
-		zeCommandListAppendLaunchKernelIndirect(cmdList, kernel, &launchArgs, nullptr, 0, nullptr); // TODO: Muuta kernel muuttuja oikeaksi
+		zeCommandListAppendLaunchKernelIndirect(cmdList, kernel, &launchArgs, event, 0, nullptr);
 		break;
 	default:
 		break;
